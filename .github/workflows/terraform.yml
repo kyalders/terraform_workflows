@@ -93,7 +93,7 @@ jobs:
   tf-lint:
     name: TF Lint
     if: ${{ inputs.env == 'dev' && !inputs.destroy }}
-    runs-on: [self-hosted, Linux, X64, enterprise] 
+    runs-on: ubuntu-latest
     environment: ${{ inputs.env }}
 
     defaults:
@@ -120,7 +120,7 @@ jobs:
     name: 'Terraform Provisioning'
     if: ${{ always() }}
     needs: tf-lint
-    runs-on: [self-hosted, Linux, X64, enterprise]
+    runs-on: ubuntu-latest
     environment: ${{ inputs.env }}
 
     defaults:
