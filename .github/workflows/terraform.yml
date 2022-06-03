@@ -1,0 +1,231 @@
+# Terraform Resuable Workflow - v2
+# Has TF Lint job
+# Ability to run all terraform commands based on inputs
+# When tf-destroy is applied an automatic sleep timer is set, this sleep input can also be supplied by the calling workflow
+# variables input is a string input that expects a JSON formated string of variables to be passed into the terraform run
+# token-files is an input pointing to an array of files that will pass through tokenization
+### As as side note, tokenization allows us to set values an environment level before the code is processed in that environment.
+
+name: 'Terraform Workflow'
+
+on:
+  workflow_call:
+    inputs:
+      env:
+        required: true
+        type: string
+        description: Github Environment targeted for deployment.
+      tf-path:
+        required: false
+        type: string
+        default: "${{ github.workspace }}"
+        description: Path to your terraform content. Ensure the working directory is set within your terraform cloud workspace to match. Defaults to root.
+      tf-plan:
+        required: false
+        type: boolean
+        default: false
+        description: Will run terraform plan. If set, an apply will not occur.      
+      tf-apply:
+        required: false
+        type: boolean
+        default: true
+        description: Will run terraform plan. If set, an apply will not occur.
+      tf-destroy:
+        required: false
+        type: boolean
+        default: false
+        description: When set, will perform a terraform destroy after an apply.
+      tf-version:
+        required: false
+        type: string
+        default: "~1.1.0"
+        description: Terraform version to target.
+      sleep: 
+        required: false
+        type: number
+        default: 300
+        description: Sets a sleep timer, in seconds, on a terraform destroy command.
+      token-files:
+        required: false
+        type: string
+        default: '["**/*.tf"]'
+        description: A string array files that will be tokenized. Must include full path to files.
+      variables: 
+        required: false
+        type: string
+        default: ""
+        description: Terraform variables that will be passed on the command line. Variables must be provided in json format without quotations.
+        # Expects a JSON formatted variable
+        #   variables: |
+        #     {
+        #       test1: "value1",
+        #       test2: "value2",
+        #       test3: [
+        #         "value3-a",
+        #         "value3-b"
+        #       ]
+        #     }
+
+    secrets:
+      TF_API_TOKEN:
+        required: true
+
+# terraform-provisioning-dev
+#   name: TF Provision Demo
+#   if: ${{ (github.event.inputs.destroy == 'false') || (github.event_name == 'push' || github.event_name == 'pull_request')}}
+#   uses: hca-ccoe/workflow-templates/.github/workflows/tf-v2.yml@mrb/tf-workflows
+#   with:
+#     env: dev
+#     tf-path: infra/terraform (optional: defaults to root)
+#     tf-plan: true (optional: defaults false)
+#     tf-destroy: true (optional: defaults false)
+#     sleep: 30 (optional: defaults 300)
+#     token-files: '["infra/terraform/variables.tf", "infra/terraform/providers.tf"]'
+#     variables: |
+#       {
+#         test1: "value1",
+#         test2: "value2"
+#       }
+#   secrets:
+#     TF_API_TOKEN: ${{ secrets.TERRAFORM_CLOUD_TEAM_TOKEN }}
+
+jobs:
+  tf-lint:
+    name: TF Lint
+    if: ${{ inputs.env == 'dev' && !inputs.destroy }}
+    runs-on: [self-hosted, Linux, X64, enterprise] 
+    environment: ${{ inputs.env }}
+
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ inputs.tf-path }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Setup TF Lint
+        uses: terraform-linters/setup-tflint@v1
+        with:
+          tflint_version: latest
+
+      - name: Init TFLint
+        run: tflint --init
+
+      - name: Run TFLint
+        run: tflint -f json
+
+  terraform-provision:
+    name: 'Terraform Provisioning'
+    if: ${{ always() }}
+    needs: tf-lint
+    runs-on: [self-hosted, Linux, X64, enterprise]
+    environment: ${{ inputs.env }}
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v2
+
+    # - name: Checkout Scripts
+    #   uses: actions/checkout@v3
+    #   with:
+    #     repository: workflow-templates
+    #     ref: mrb/tf-workflows
+    #     path: scripts
+
+    - name: Replace Tokens
+      uses: cschleiden/replace-tokens@v1
+      with:
+        files: '${{ inputs.token-files }}'
+      env:
+        environment: ${{ inputs.env }}
+
+    - name: Append Variables - Output
+      id: append-variables
+      run: |
+        $env:variables | Out-File -FilePath .\var.txt
+        $varStringFile = Get-Content -Path .\var.txt
+
+        $varString = ""
+        foreach($line in $varStringFile) {
+          $varString += $line
+        }
+
+        $varObj = $varString | ConvertFrom-Json -Depth 5
+        Write-Host $varObj | Format-Table
+
+        $variableStrings = ""
+        foreach($var in $varObj.PSObject.Properties) {
+          Write-Host $var.Name
+          Write-Host $var.Value
+          $type = $var.Value.GetType().ToString()
+          Write-Host $type
+
+          $value = $var.Value
+          if($type -eq "System.Object[]"){
+            Write-Host "Inside Loop"
+            $value = ""
+            Write-Host $var.Value.Count
+            for($i = 0; $i -lt $var.Value.Count; $i++) {
+              if(($i +1) -eq $var.Value.Count) {
+                $value += "`""
+                $value += $var.Value[$i]
+                $value += "`""
+              }
+              else {
+                $value += "`""
+                $value += $var.Value[$i]
+                $value += "`", "
+              }
+            }
+            $value = "[$($value)]"
+          }
+
+          $variableStrings += "-var='$($var.Name)=$($value)' "
+        }
+
+        Write-Host $variableStrings
+        Write-Host "::set-output name=variableStrings::$($variableStrings)"
+      shell: pwsh -command ". {0}"
+      env:
+        variables: ${{ inputs.variables }}
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v1
+      with:
+        cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+        terraform_version: ${{ inputs.tf-version }}
+
+    - name: Terraform Init
+      run: terraform init -upgrade
+      working-directory: ${{ inputs.tf-path }}
+
+    - name: Terraform Format
+      run: terraform fmt -check
+      continue-on-error: true
+      working-directory: ${{ inputs.tf-path }}
+
+
+    - name: Terraform Plan
+      run: |
+        terraform validate
+        terraform plan ${{ steps.append-variables.outputs.variableStrings }}
+      if: inputs.tf-plan
+      working-directory: ${{ inputs.tf-path }}
+
+    - name: Terraform Apply
+      if: inputs.tf-apply
+      run: terraform apply -auto-approve ${{ steps.append-variables.outputs.variableStrings }}
+      working-directory: ${{ inputs.tf-path }}
+
+    - name: Terraform Destroy
+      run: |
+        sleep ${{ inputs.sleep }}s
+        terraform destroy -auto-approve ${{ steps.append-variables.outputs.variableStrings }}
+      if: inputs.tf-destroy
+      working-directory: ${{ inputs.tf-path }}
