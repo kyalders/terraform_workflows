@@ -7,7 +7,6 @@
 ### As as side note, tokenization allows us to set values an environment level before the code is processed in that environment.
 
 name: 'Terraform Workflow'
-
 on:
   workflow_call:
     inputs:
