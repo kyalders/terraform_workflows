@@ -55,39 +55,10 @@ on:
         type: string
         default: ""
         description: Terraform variables that will be passed on the command line. Variables must be provided in json format without quotations.
-        # Expects a JSON formatted variable
-        #   variables: |
-        #     {
-        #       test1: "value1",
-        #       test2: "value2",
-        #       test3: [
-        #         "value3-a",
-        #         "value3-b"
-        #       ]
-        #     }
 
     secrets:
       TF_API_TOKEN:
         required: true
-
-# terraform-provisioning-dev
-#   name: TF Provision Demo
-#   if: ${{ (github.event.inputs.destroy == 'false') || (github.event_name == 'push' || github.event_name == 'pull_request')}}
-#   uses: hca-ccoe/workflow-templates/.github/workflows/tf-v2.yml@mrb/tf-workflows
-#   with:
-#     env: dev
-#     tf-path: infra/terraform (optional: defaults to root)
-#     tf-plan: true (optional: defaults false)
-#     tf-destroy: true (optional: defaults false)
-#     sleep: 30 (optional: defaults 300)
-#     token-files: '["infra/terraform/variables.tf", "infra/terraform/providers.tf"]'
-#     variables: |
-#       {
-#         test1: "value1",
-#         test2: "value2"
-#       }
-#   secrets:
-#     TF_API_TOKEN: ${{ secrets.TERRAFORM_CLOUD_TEAM_TOKEN }}
 
 jobs:
   tf-lint:
@@ -130,13 +101,6 @@ jobs:
     steps:
     - name: Checkout
       uses: actions/checkout@v2
-
-    # - name: Checkout Scripts
-    #   uses: actions/checkout@v3
-    #   with:
-    #     repository: workflow-templates
-    #     ref: mrb/tf-workflows
-    #     path: scripts
 
     - name: Replace Tokens
       uses: cschleiden/replace-tokens@v1
@@ -209,7 +173,6 @@ jobs:
       run: terraform fmt -check
       continue-on-error: true
       working-directory: ${{ inputs.tf-path }}
-
 
     - name: Terraform Plan
       run: |
